@@ -1,0 +1,10 @@
+# Ignore personal data files
+answers.json
+profile.json
+QA_BANK.md
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

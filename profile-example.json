@@ -1,0 +1,76 @@
+{
+  "name": "Jane Doe",
+  "target_roles": [
+    "Senior Full-Stack Engineer",
+    "Technical Lead"
+  ],
+  "professional_summary": "Senior Software Engineer with 7+ years of experience specializing in building scalable web applications, designing distributed microservices, and leading agile engineering teams. Proven track record of improving web performance metrics and mentoring junior engineers.",
+  "looking_for": "Seeking a Senior or Technical Lead role where I can drive technical design, establish solid testing practices, and collaborate closely with product teams to build scalable software solutions.",
+  "core_skills": {
+    "technical": [
+      "JavaScript/TypeScript",
+      "React",
+      "Node.js",
+      "Python",
+      "PostgreSQL",
+      "AWS (S3, EC2, Lambda, RDS)",
+      "Docker",
+      "CI/CD (GitHub Actions)"
+    ],
+    "soft": [
+      "Technical Mentorship",
+      "Cross-functional Collaboration",
+      "System Architecture Design",
+      "Agile/Scrum Leadership"
+    ]
+  },
+  "experience": [
+    {
+      "role": "Senior Software Engineer",
+      "company": "TechInnovate Solutions",
+      "period": "2021 - Present",
+      "bullet_points": [
+        "Architected and migrated a monolithic billing system into Node.js microservices, reducing invoice processing times by 40%.",
+        "Led a team of 4 engineers to build a real-time analytics dashboard using React and WebSockets, increasing customer engagement by 15%.",
+        "Championed the adoption of comprehensive integration testing in GitHub Actions, decreasing production release defects by 25%."
+      ]
+    },
+    {
+      "role": "Software Engineer",
+      "company": "CloudScale Apps",
+      "period": "2019 - 2021",
+      "bullet_points": [
+        "Optimized frontend performance of a high-traffic SaaS landing page, improving Google Lighthouse SEO and performance scores from 65 to 92.",
+        "Designed and maintained RESTful APIs in Python/FastAPI, handling over 2M requests daily with 99.9% uptime."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "EventSphere Scheduler",
+      "description": "A high-concurrency event booking platform handling real-time ticket sales.",
+      "technologies": ["TypeScript", "Node.js", "Redis", "PostgreSQL"],
+      "accomplishments": [
+        "Implemented Redis-based distributed locks to prevent double-booking during high-traffic ticket sales.",
+        "Configured horizontal auto-scaling on AWS ECS to support traffic spikes of up to 10k requests per second."
+      ]
+    }
+  ],
+  "education": [
+    {
+      "degree": "Master of Science, Computer Science",
+      "institution": "State University",
+      "year": "2019"
+    },
+    {
+      "degree": "Bachelor of Science, Software Engineering",
+      "institution": "State University",
+      "year": "2017"
+    }
+  ],
+  "general_achievements": [
+    "Successfully led the system architecture rewrite and microservices migration of a high-load payment engine.",
+    "Spearheaded automated testing initiatives that improved deploy confidence and reduced test suite execution time by 50%."
+  ],
+  "ai_extracted_facts": []
+}
