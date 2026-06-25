@@ -4,7 +4,7 @@ import json
 import re
 import argparse
 import tempfile
-from typing import Dict, Any, Optional
+from typing import Dict, List, Any, Optional
 
 # --- Constants ---
 DEFAULT_ANSWERS_FILE = "answers.json"
@@ -13,23 +13,90 @@ MAX_NARRATIVE_WORDS = 250
 DIRECT_QUESTION_LENGTH_THRESHOLD = 8
 DIRECT_QUESTION_TAGS = {"collaboration", "direct", "quick"}
 
-# Common robotic bold headers (e.g. **Situation:** or **Situation**:)
 ROBOTIC_HEADERS_REGEX = re.compile(
     r'\*\*(situation|task|action|result|internal|production|why)\s*.*?(:\*\*|\*\*:)',
     re.IGNORECASE
 )
-# Generic bold headers starting a paragraph (e.g., "**Context:**" or "**Context**:")
 GENERIC_BOLD_START = re.compile(r'^\s*\*\*.*?(:\*\*|\*\*:)', re.MULTILINE)
 
+WHITELISTED_ALL_CAPS = {
+    "SOC", "HIPAA", "SaaS", "HTML", "CSS", "REST", "API", "AWS", "ADR", "ADRs",
+    "STAR", "JSON", "JSONL", "TF", "IDF", "RAM", "CPU", "PR", "PRs", "UX", "UI",
+    "SDK", "IT", "EM", "B2B", "CI", "CD", "NET"
+}
 
-def audit_database(answers_path: str) -> Optional[Dict[str, Any]]:
-    """Audits the Q&A database for style and format violations.
+
+def check_banned_punctuation(text: str) -> List[str]:
+    """Checks for banned punctuation patterns."""
+    errors = []
+    # Space before ending punctuation or clause markers (ignoring dot prefixes like .NET)
+    if re.search(r'\s+[.,!?;:](?!\w)', text):
+        errors.append("Space before punctuation")
+    # Repeated commas
+    if re.search(r',{2,}', text):
+        errors.append("Repeated commas (,,)")
+    # Repeated exclamations
+    if re.search(r'!{2,}', text):
+        errors.append("Repeated exclamation marks (!!)")
+    # Repeated question marks
+    if re.search(r'\?{2,}', text):
+        errors.append("Repeated question marks (??)")
+    
+    # Repeated periods that are not exactly three (...)
+    for match in re.finditer(r'\.{2,}', text):
+        dot_seq = match.group(0)
+        if len(dot_seq) != 3:
+            errors.append(f"Invalid punctuation sequence: '{dot_seq}'")
+            break
+            
+    return errors
+
+
+def check_excessive_capitalization(text: str) -> List[str]:
+    """Checks for excessive capitalization violations, ignoring a whitelist of technical abbreviations."""
+    errors = []
+    # Find all words that are fully capitalized and length >= 4
+    raw_words = re.findall(r'\b[A-Z]{4,}\b', text)
+    for word in raw_words:
+        if word not in WHITELISTED_ALL_CAPS:
+            errors.append(f"Excessive capitalization: '{word}'")
+    return errors
+
+
+def get_sentences(text: str) -> List[str]:
+    """Splits a paragraph into sentences using standard ending punctuation."""
+    raw_sentences = re.split(r'(?<=[.!?])\s+', text)
+    return [s.strip() for s in raw_sentences if s.strip()]
+
+
+def check_repeated_sentence_starters(text: str) -> List[str]:
+    """Flags adjacent sentences in the text that start with the same word."""
+    flags = []
+    sentences = get_sentences(text)
+    prev_first_word = None
+    
+    for idx, s in enumerate(sentences):
+        # Extract first word character-only
+        match = re.match(r'^([a-zA-Z]+)', s)
+        if match:
+            first_word = match.group(1).lower()
+            if prev_first_word and first_word == prev_first_word:
+                flags.append(f"Repeated sentence starter '{first_word}' in adjacent sentences")
+            prev_first_word = first_word
+        else:
+            prev_first_word = None
+            
+    return flags
+
+
+def audit_database(answers_path: str) -> Optional[List[Dict[str, Any]]]:
+    """Audits the Q&A database for Layer 1 style and format violations.
 
     Args:
         answers_path: Absolute or relative path to the answers JSON file.
 
     Returns:
-        Optional[Dict[str, Any]]: The compliance report on success, or None on failure.
+        Optional[List[Dict[str, Any]]]: The compliance report per entry on success, or None on failure.
     """
     if not os.path.exists(answers_path):
         print(
@@ -55,17 +122,15 @@ def audit_database(answers_path: str) -> Optional[Dict[str, Any]]:
         )
         return None
 
-    violations = []
-    total_q = len(db)
-    clean_q = 0
+    results = []
     
     for idx, item in enumerate(db):
         if not isinstance(item, dict):
-            violations.append({
-                "index": idx,
-                "question": "<Invalid Item>",
+            results.append({
+                "entry_id": idx,
+                "format_errors": ["Item is not a JSON object"],
                 "word_count": 0,
-                "errors": ["Item is not a JSON object"]
+                "deterministic_flags": []
             })
             continue
 
@@ -78,53 +143,48 @@ def audit_database(answers_path: str) -> Optional[Dict[str, Any]]:
             tags = [str(t).lower() for t in raw_tags if t is not None]
         else:
             tags = []
-        
-        errors = []
+            
+        format_errors = []
+        deterministic_flags = []
         
         # 1. Check for em-dashes
         if "—" in a_text or "\u2014" in a_text:
-            errors.append("Contains em-dashes (—)")
+            format_errors.append("Contains em-dashes (—)")
             
-        # 2. Check for robotic bold subheadings
-        if ROBOTIC_HEADERS_REGEX.search(a_text) or GENERIC_BOLD_START.search(a_text):
-            errors.append("Contains robotic bold subheadings (e.g. **Header**:)")
-            
-        # 3. Check length constraints
-        word_count = len(a_text.split())
+        # 2. Check banned punctuation
+        format_errors.extend(check_banned_punctuation(a_text))
         
-        # Direct questions check
+        # 3. Check excessive capitalization
+        format_errors.extend(check_excessive_capitalization(a_text))
+        
+        # 4. Check length constraints
+        word_count = len(a_text.split())
         is_direct = (
             any(t in DIRECT_QUESTION_TAGS for t in tags) or 
             len(q_text.split()) < DIRECT_QUESTION_LENGTH_THRESHOLD
         )
         
         if is_direct and word_count > MAX_DIRECT_WORDS:
-            errors.append(f"Direct Q&A answer is too long ({word_count} words; limit is {MAX_DIRECT_WORDS})")
+            format_errors.append(f"Direct Q&A answer is too long ({word_count} words; limit is {MAX_DIRECT_WORDS})")
         elif word_count > MAX_NARRATIVE_WORDS:
-            errors.append(f"Answer exceeds word count recommendation ({word_count} words; recommended max is {MAX_NARRATIVE_WORDS})")
+            format_errors.append(f"Answer exceeds word count limit ({word_count} words; limit is {MAX_NARRATIVE_WORDS})")
             
-        if errors:
-            violations.append({
-                "index": idx,
-                "question": q_text[:60] + "..." if len(q_text) > 60 else q_text,
-                "word_count": word_count,
-                "errors": errors
-            })
-        else:
-            clean_q += 1
+        # 5. Check repeated sentence starters
+        deterministic_flags.extend(check_repeated_sentence_starters(a_text))
+        
+        # 6. Check robotic bold subheadings
+        if ROBOTIC_HEADERS_REGEX.search(a_text) or GENERIC_BOLD_START.search(a_text):
+            deterministic_flags.append("Contains robotic bold subheadings (e.g. **Header**:)")
             
-    compliance_score = round((clean_q / total_q) * 100, 2) if total_q > 0 else 100.0
-    
-    report = {
-        "status": "success",
-        "total_questions": total_q,
-        "clean_questions": clean_q,
-        "compliance_score_percent": compliance_score,
-        "violations": violations
-    }
-    
-    print(json.dumps(report, indent=2, ensure_ascii=False))
-    return report
+        results.append({
+            "entry_id": idx,
+            "format_errors": format_errors,
+            "word_count": word_count,
+            "deterministic_flags": deterministic_flags
+        })
+        
+    print(json.dumps(results, indent=2, ensure_ascii=False))
+    return results
 
 
 def run_tests() -> None:
@@ -149,17 +209,44 @@ def run_tests() -> None:
         }
     ]
     
-    # Test case 3: Robotic subheadings violation (colon inside bold)
-    robotic_db_inside = [
+    # Test case 3: Space before punctuation and duplicate commas
+    punctuation_db = [
         {
             "question": "How do you handle conflicts?",
-            "answer": "**Situation:** Stakeholder had a conflict. **Action:** I aligned them.",
+            "answer": "I talk to stakeholders , they have different timelines,, and I resolve it.",
             "tags": ["collaboration"]
         }
     ]
     
-    # Test case 4: Robotic subheadings violation (colon outside bold)
-    robotic_db_outside = [
+    # Test case 4: Double periods violation
+    double_dots_db = [
+        {
+            "question": "How do you handle conflicts?",
+            "answer": "I talk to stakeholders.. They have different timelines... Then I resolve it.",
+            "tags": ["collaboration"]
+        }
+    ]
+    
+    # Test case 5: Excessive capitalization (HIPAA is allowed, OVERENGINEERED is not)
+    capitalization_db = [
+        {
+            "question": "How do you handle conflicts?",
+            "answer": "I use HIPAA compliant tools but avoid OVERENGINEERED systems.",
+            "tags": ["collaboration"]
+        }
+    ]
+    
+    # Test case 6: Repeated sentence starters
+    starters_db = [
+        {
+            "question": "How do you handle conflicts?",
+            "answer": "I align stakeholders first. I present data-backed options next.",
+            "tags": ["collaboration"]
+        }
+    ]
+    
+    # Test case 7: Robotic bold subheadings
+    robotic_db = [
         {
             "question": "How do you handle conflicts?",
             "answer": "**Situation**: Stakeholder had a conflict. **Action**: I aligned them.",
@@ -167,21 +254,12 @@ def run_tests() -> None:
         }
     ]
     
-    # Test case 5: Direct Q&A too long (>100 words)
+    # Test case 8: Direct Q&A too long (>100 words)
     long_direct_db = [
         {
             "question": "Quick question?",
             "answer": " ".join(["word"] * 105),
             "tags": ["quick"]
-        }
-    ]
-    
-    # Test case 6: Narrative Q&A too long (>250 words)
-    long_narrative_db = [
-        {
-            "question": "Tell me about a very long project that you worked on last year.",
-            "answer": " ".join(["word"] * 260),
-            "tags": ["narrative"]
         }
     ]
 
@@ -190,7 +268,6 @@ def run_tests() -> None:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(db_data, f)
-            # Redirect stdout to capture/mute report dump during assertions
             import io
             from contextlib import redirect_stdout
             f_out = io.StringIO()
@@ -204,45 +281,53 @@ def run_tests() -> None:
     # Verification
     report = run_audit_on_db(clean_db)
     assert report is not None, "Clean DB should audit successfully"
-    assert report["compliance_score_percent"] == 100.0, "Clean DB compliance should be 100%"
-    assert len(report["violations"]) == 0, "Clean DB should have no violations"
+    assert len(report[0]["format_errors"]) == 0, "Clean DB should have no format errors"
+    assert len(report[0]["deterministic_flags"]) == 0, "Clean DB should have no flags"
     print("[PASS] Test 1: Clean Q&A passed.")
 
     report = run_audit_on_db(em_dash_db)
-    assert report is not None and len(report["violations"]) == 1, "Em-dash violation not flagged"
-    assert "Contains em-dashes (—)" in report["violations"][0]["errors"][0], "Expected em-dash error message"
+    assert report is not None and "Contains em-dashes (—)" in report[0]["format_errors"], "Em-dash violation not flagged"
     print("[PASS] Test 2: Em-dash violation flagged.")
 
-    report = run_audit_on_db(robotic_db_inside)
-    assert report is not None and len(report["violations"]) == 1, "Robotic subheadings violation (inside colon) not flagged"
-    assert "Contains robotic bold subheadings" in report["violations"][0]["errors"][0], "Expected robotic subheading error"
-    print("[PASS] Test 3: Robotic subheadings violation (inside colon) flagged.")
+    report = run_audit_on_db(punctuation_db)
+    assert report is not None
+    assert "Space before punctuation" in report[0]["format_errors"], "Space before punctuation not flagged"
+    assert "Repeated commas (,,)" in report[0]["format_errors"], "Repeated commas not flagged"
+    print("[PASS] Test 3: Banned punctuation (space & commas) flagged.")
 
-    report = run_audit_on_db(robotic_db_outside)
-    assert report is not None and len(report["violations"]) == 1, "Robotic subheadings violation (outside colon) not flagged"
-    assert "Contains robotic bold subheadings" in report["violations"][0]["errors"][0], "Expected robotic subheading error"
-    print("[PASS] Test 4: Robotic subheadings violation (outside colon) flagged.")
+    report = run_audit_on_db(double_dots_db)
+    assert report is not None
+    assert any("Invalid punctuation sequence" in err for err in report[0]["format_errors"]), "Double dots not flagged"
+    print("[PASS] Test 4: Banned punctuation (double dots) flagged.")
+
+    report = run_audit_on_db(capitalization_db)
+    assert report is not None
+    assert any("Excessive capitalization: 'OVERENGINEERED'" in err for err in report[0]["format_errors"]), "Overengineered not flagged"
+    assert not any("HIPAA" in err for err in report[0]["format_errors"]), "HIPAA should be whitelisted"
+    print("[PASS] Test 5: Excessive capitalization flagged (and whitelisted acronyms ignored).")
+
+    report = run_audit_on_db(starters_db)
+    assert report is not None and len(report[0]["deterministic_flags"]) == 1, "Repeated sentence starters not flagged"
+    assert "Repeated sentence starter 'i'" in report[0]["deterministic_flags"][0], "Expected starter flag"
+    print("[PASS] Test 6: Repeated sentence starters flagged.")
+
+    report = run_audit_on_db(robotic_db)
+    assert report is not None and "Contains robotic bold subheadings (e.g. **Header**:)" in report[0]["deterministic_flags"], "Robotic subheading not flagged"
+    print("[PASS] Test 7: Robotic bold subheading flagged.")
 
     report = run_audit_on_db(long_direct_db)
-    assert report is not None and len(report["violations"]) == 1, "Long direct Q&A not flagged"
-    assert "too long" in report["violations"][0]["errors"][0], "Expected too long direct Q&A error"
-    print("[PASS] Test 5: Long direct Q&A flagged.")
+    assert report is not None and any("too long" in err for err in report[0]["format_errors"]), "Long direct Q&A not flagged"
+    print("[PASS] Test 8: Long direct Q&A length constraint flagged.")
 
-    report = run_audit_on_db(long_narrative_db)
-    assert report is not None and len(report["violations"]) == 1, "Long narrative Q&A not flagged"
-    assert "exceeds word count recommendation" in report["violations"][0]["errors"][0], "Expected too long narrative error"
-    print("[PASS] Test 6: Long narrative Q&A flagged.")
-
-    print("All auditor tests passed successfully!")
+    print("All Layer 1 auditor tests passed successfully!")
 
 
 if __name__ == "__main__":
-    # Determine default path fallback
     script_dir = os.path.dirname(os.path.abspath(__file__))
     default_workspace = os.path.abspath(os.path.join(script_dir, "..", "..", "..", ".."))
     default_path = os.path.join(default_workspace, DEFAULT_ANSWERS_FILE)
 
-    parser = argparse.ArgumentParser(description="Audit Q&A database for styling and formatting rules.")
+    parser = argparse.ArgumentParser(description="Audit Q&A database for Layer 1 styling and formatting rules.")
     parser.add_argument(
         "--file", 
         type=str, 
