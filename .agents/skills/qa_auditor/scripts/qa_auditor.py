@@ -22,7 +22,9 @@ GENERIC_BOLD_START = re.compile(r'^\s*\*\*.*?(:\*\*|\*\*:)', re.MULTILINE)
 WHITELISTED_ALL_CAPS = {
     "SOC", "HIPAA", "SaaS", "HTML", "CSS", "REST", "API", "AWS", "ADR", "ADRs",
     "STAR", "JSON", "JSONL", "TF", "IDF", "RAM", "CPU", "PR", "PRs", "UX", "UI",
-    "SDK", "IT", "EM", "B2B", "CI", "CD", "NET"
+    "SDK", "IT", "EM", "B2B", "CI", "CD", "NET", "RTMP", "RTSP", "MPEG", "DASH",
+    "CRUD", "SDLC", "MVP", "MVPs", "ROI", "PDLC", "UUID", "UUIDs", "EMR", "PHI",
+    "PI", "HTTP", "OAS", "DTO", "DTOs", "CICESE", "UABC", "RBAC"
 }
 
 
